@@ -1,0 +1,289 @@
+{
+ "name": "Daily job digest from the German Federal Employment Agency (Arbeitsagentur) to Telegram",
+ "nodes": [
+  {
+   "parameters": {
+    "content": "## Daily job digest from the German Federal Employment Agency (Bundesagentur für Arbeit)\n\nSearches the official **Jobsuche API** of the Bundesagentur für Arbeit for your keywords around a German postcode, drops postings you have already seen, ranks the rest and sends one compact digest to Telegram every morning.\n\n**Who is it for:** job seekers in Germany, recruiters and small companies that want to watch the local job market for specific roles without opening job boards every day.\n\n### How it works\n1. **Schedule** runs once a day.\n2. **Search settings** holds keywords, postcode, radius and filters.\n3. One API request per keyword (the API takes one search term at a time).\n4. **Filter & rank** merges the results, removes duplicates, old postings, excluded words and anything already sent (remembered for 60 days).\n5. The digest is sent to Telegram; nothing is sent if there are no new postings.\n\n### Setup (≈5 minutes)\n1. Edit **Search settings** (keywords, postcode, radius, Telegram chat ID).\n2. Add your Telegram bot credential to **Send to Telegram**.\n3. Activate the workflow.\n\nNo API key needed: the Jobsuche API uses the public header `X-API-Key: jobboerse-jobsuche`.\n\nBuilt by Denis Shokhirev · DennisCraft AI Studio, Freiburg — gerdennisai.com",
+    "width": 420,
+    "height": 820,
+    "color": 6
+   },
+   "name": "Overview",
+   "type": "n8n-nodes-base.stickyNote",
+   "typeVersion": 1,
+   "position": [
+    -460,
+    -260
+   ]
+  },
+  {
+   "parameters": {
+    "content": "### ⚙️ Search settings\n- **keywords** — comma-separated, German terms work best (e.g. `Prozessautomatisierung, n8n`)\n- **location** — use a **postcode** (PLZ), not a town name: names are ambiguous (e.g. Lahr exists twice)\n- **radiusKm** — search radius around the postcode\n- **maxAgeDays** — only postings published or updated within this window\n- **excludeWords** — comma-separated words; postings whose title contains one are skipped\n- **telegramChatId** — your chat ID (get it from @userinfobot)",
+    "width": 340,
+    "height": 300,
+    "color": 5
+   },
+   "name": "Settings note",
+   "type": "n8n-nodes-base.stickyNote",
+   "typeVersion": 1,
+   "position": [
+    180,
+    -260
+   ]
+  },
+  {
+   "parameters": {
+    "content": "### 🔌 Jobsuche API notes\n- Endpoint `/pc/v6/jobs` (older v4/v5 list endpoints return 403)\n- Requests are sent one by one with a short pause to stay polite\n- The `veroeffentlichtseit` parameter does not filter reliably, so dates are checked in **Filter & rank**\n- \"Already sent\" memory uses workflow static data and only persists in **active** (scheduled) runs, not in manual test runs",
+    "width": 380,
+    "height": 300,
+    "color": 7
+   },
+   "name": "API note",
+   "type": "n8n-nodes-base.stickyNote",
+   "typeVersion": 1,
+   "position": [
+    560,
+    -260
+   ]
+  },
+  {
+   "parameters": {
+    "rule": {
+     "interval": [
+      {
+       "field": "cronExpression",
+       "expression": "0 7 * * *"
+      }
+     ]
+    }
+   },
+   "name": "Every morning",
+   "type": "n8n-nodes-base.scheduleTrigger",
+   "typeVersion": 1.2,
+   "position": [
+    0,
+    100
+   ]
+  },
+  {
+   "parameters": {
+    "assignments": {
+     "assignments": [
+      {
+       "id": "s0",
+       "name": "keywords",
+       "type": "string",
+       "value": "n8n, Prozessautomatisierung, KI, Digitalisierung"
+      },
+      {
+       "id": "s1",
+       "name": "location",
+       "type": "string",
+       "value": "79098"
+      },
+      {
+       "id": "s2",
+       "name": "radiusKm",
+       "type": "number",
+       "value": 50
+      },
+      {
+       "id": "s3",
+       "name": "maxAgeDays",
+       "type": "number",
+       "value": 3
+      },
+      {
+       "id": "s4",
+       "name": "excludeWords",
+       "type": "string",
+       "value": "SPS, Elektroniker, Pflege, Lager, Fahrer"
+      },
+      {
+       "id": "s5",
+       "name": "maxJobsInDigest",
+       "type": "number",
+       "value": 15
+      },
+      {
+       "id": "s6",
+       "name": "telegramChatId",
+       "type": "string",
+       "value": "YOUR_CHAT_ID"
+      }
+     ]
+    },
+    "options": {}
+   },
+   "name": "Search settings",
+   "type": "n8n-nodes-base.set",
+   "typeVersion": 3.4,
+   "position": [
+    240,
+    100
+   ]
+  },
+  {
+   "parameters": {
+    "jsCode": "// One API request per keyword. The Jobsuche API searches one term at a time.\nconst s = $input.first().json;\nconst keywords = String(s.keywords || '').split(',').map(k => k.trim()).filter(Boolean);\nreturn keywords.map(was => ({\n  json: {\n    was,\n    url: 'https://rest.arbeitsagentur.de/jobboerse/jobsuche-service/pc/v6/jobs'\n      + '?was=' + encodeURIComponent(was)\n      + '&wo=' + encodeURIComponent(s.location)\n      + '&umkreis=' + Number(s.radiusKm || 25)\n      + '&size=100',\n  },\n}));"
+   },
+   "name": "Build queries",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    480,
+    100
+   ]
+  },
+  {
+   "parameters": {
+    "url": "={{ $json.url }}",
+    "sendHeaders": true,
+    "headerParameters": {
+     "parameters": [
+      {
+       "name": "X-API-Key",
+       "value": "jobboerse-jobsuche"
+      }
+     ]
+    },
+    "options": {
+     "batching": {
+      "batch": {
+       "batchSize": 1,
+       "batchInterval": 500
+      }
+     },
+     "response": {
+      "response": {
+       "neverError": true,
+       "responseFormat": "json"
+      }
+     }
+    }
+   },
+   "name": "Jobsuche API",
+   "type": "n8n-nodes-base.httpRequest",
+   "typeVersion": 4.2,
+   "position": [
+    720,
+    100
+   ],
+   "onError": "continueRegularOutput"
+  },
+  {
+   "parameters": {
+    "jsCode": "// Merge all responses, drop old/excluded/already-sent postings, rank the rest.\nconst s = $('Search settings').first().json;\nconst queries = $('Build queries').all().map(i => i.json.was);\nconst exclude = String(s.excludeWords || '').split(',').map(w => w.trim()).filter(Boolean);\nconst excludeRe = exclude.length ? new RegExp(exclude.map(w => w.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')).join('|'), 'i') : null;\nconst cutoff = Date.now() - Number(s.maxAgeDays || 3) * 864e5;\n\n// Remember postings we already sent (workflow static data, kept 60 days).\n// Note: static data is only saved in production (scheduled) runs, not in manual test runs.\nconst store = $getWorkflowStaticData('global');\nstore.seen = store.seen || {};\nfor (const k of Object.keys(store.seen)) if (Date.now() - Date.parse(store.seen[k]) > 60 * 864e5) delete store.seen[k];\n\nconst jobs = new Map();\n$input.all().forEach((item, idx) => {\n  for (const p of (item.json && item.json.ergebnisliste) || []) {\n    const ref = p.referenznummer;\n    if (!ref || store.seen[ref]) continue;\n    // The API ignores the \"published since\" parameter, so filter by date here.\n    const ts = Math.max(Date.parse(p.datumErsteVeroeffentlichung || '') || 0, Date.parse(p.aenderungsdatum || '') || 0);\n    if (ts < cutoff) continue;\n    const title = p.stellenangebotsTitel || '';\n    if (excludeRe && excludeRe.test(title + ' ' + (p.hauptberuf || ''))) continue;\n    const prev = jobs.get(ref);\n    if (prev) { prev.matched.add(queries[idx]); continue; }\n    const adr = ((p.stellenlokationen || [])[0] || {}).adresse || {};\n    jobs.set(ref, {\n      ref, title, company: p.firma || '', city: adr.ort || '',\n      distanceKm: typeof p.entfernung === 'number' ? p.entfernung : null,\n      homeOffice: !!p.homeofficemoeglich, published: p.datumErsteVeroeffentlichung || '',\n      url: p.externeURL || ('https://www.arbeitsagentur.de/jobsuche/jobdetail/' + ref),\n      matched: new Set([queries[idx]]),\n    });\n  }\n});\n\n// Simple ranking: more matching keywords first, then keyword in title, home office, distance.\nconst ranked = [...jobs.values()].map(j => {\n  const inTitle = [...j.matched].some(k => new RegExp('(^|[^\\\\p{L}])' + k.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&') + '($|[^\\\\p{L}])', 'iu').test(j.title));\n  const score = j.matched.size * 10 + (inTitle ? 15 : 0) + (j.homeOffice ? 5 : 0) - (j.distanceKm || 0) / 10;\n  return { ...j, matched: [...j.matched], score: Math.round(score) };\n}).sort((a, b) => b.score - a.score);\n\n// Everything found today counts as seen, so lower-ranked leftovers do not trickle in tomorrow.\nfor (const j of ranked) store.seen[j.ref] = new Date().toISOString();\nconst top = ranked.slice(0, Number(s.maxJobsInDigest || 15));\nreturn top.map(j => ({ json: { ...j, totalFound: ranked.length } }));"
+   },
+   "name": "Filter & rank",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    960,
+    100
+   ],
+   "alwaysOutputData": false
+  },
+  {
+   "parameters": {
+    "jsCode": "// Build one Telegram message (HTML). Long digests are split below Telegram's 4096-char limit.\nconst s = $('Search settings').first().json;\nconst esc = v => String(v ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst today = new Intl.DateTimeFormat('de-DE', { timeZone: 'Europe/Berlin', day: '2-digit', month: '2-digit', year: 'numeric' }).format(new Date());\nconst blocks = $input.all().map(({ json: j }) =>\n  `<b>${esc(j.title)}</b>\\n${esc(j.company)} · ${esc(j.city)}${j.distanceKm != null ? ' · ' + j.distanceKm + ' km' : ''}${j.homeOffice ? ' · 🏠 Homeoffice' : ''}\\n`\n  + `🔎 ${esc(j.matched.join(', '))}\\n<a href=\"${esc(j.url)}\">Stellenanzeige öffnen</a>`);\nconst total = $input.first().json.totalFound;\nconst header = `🧭 <b>Neue Stellen ${today}</b> — ${total} Treffer rund um ${esc(s.location)} (${s.radiusKm} km)`\n  + (total > blocks.length ? `, hier die ${blocks.length} besten` : '');\nconst parts = [];\nlet cur = header;\nfor (const b of blocks) {\n  if ((cur + '\\n\\n' + b).length > 3800) { parts.push(cur); cur = b; } else cur += '\\n\\n' + b;\n}\nparts.push(cur);\nreturn parts.map(text => ({ json: { text, chatId: s.telegramChatId } }));"
+   },
+   "name": "Format digest",
+   "type": "n8n-nodes-base.code",
+   "typeVersion": 2,
+   "position": [
+    1200,
+    100
+   ]
+  },
+  {
+   "parameters": {
+    "chatId": "={{ $json.chatId }}",
+    "text": "={{ $json.text }}",
+    "additionalFields": {
+     "parse_mode": "HTML",
+     "disable_web_page_preview": true,
+     "appendAttribution": false
+    }
+   },
+   "name": "Send to Telegram",
+   "type": "n8n-nodes-base.telegram",
+   "typeVersion": 1.2,
+   "position": [
+    1440,
+    100
+   ]
+  }
+ ],
+ "connections": {
+  "Every morning": {
+   "main": [
+    [
+     {
+      "node": "Search settings",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Search settings": {
+   "main": [
+    [
+     {
+      "node": "Build queries",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Build queries": {
+   "main": [
+    [
+     {
+      "node": "Jobsuche API",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Jobsuche API": {
+   "main": [
+    [
+     {
+      "node": "Filter & rank",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Filter & rank": {
+   "main": [
+    [
+     {
+      "node": "Format digest",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  },
+  "Format digest": {
+   "main": [
+    [
+     {
+      "node": "Send to Telegram",
+      "type": "main",
+      "index": 0
+     }
+    ]
+   ]
+  }
+ },
+ "settings": {
+  "executionOrder": "v1"
+ }
+}
